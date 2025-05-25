@@ -8,18 +8,6 @@ from datetime import datetime
 import pytz  
 
 
-# async def auth():
-#     username = input("username: ")
-#     passw = input ("password: ")
-#     return username , passw
-
-# async def setInfo():
-#     crypto_name = input("which crypto:")
-#     publish_date = input("set date: ")
-#     publish_time = input("set time: ")
-#     publish = publish_date + ' ' +  publish_time
-#     return crypto_name, publish
-
 async def set_realTime():
     tehran_tz = pytz.timezone('Asia/Tehran')  
     tehran_time = datetime.now(tehran_tz)
@@ -42,9 +30,6 @@ async def convert_crypto_name(crypto_name):
         'bit': 'بیت‌ کوین',  
         'ethereum': 'اتریوم',  
         'ripple': 'ریپل',  
-        'litec': 'لایت‌ کوین',  
-        'cardano': 'کاردا نو',  
-        'polkadot': 'پولکادات',  
         'doge': 'دوج‌ کوین',
         'not' : 'نات کوین'  
     }  
