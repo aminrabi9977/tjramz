@@ -83,7 +83,7 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         ],
                         [
                             InlineKeyboardButton("Cardano (ADA)", callback_data="ada"),
-                            InlineKeyboardButton("Shiba Inu (SHIB)", callback_data="1000shib")
+                            InlineKeyboardButton("Shiba Inu (SHIB)", callback_data="shib")
                         ],
                         [
                             InlineKeyboardButton("Tron (TRX)", callback_data="trx"),
