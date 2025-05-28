@@ -13,7 +13,7 @@ from datetime import datetime
 import asyncio
 from playwright.async_api import async_playwright
 from play import scrape
-from uploader import upload_playwright, convert_crypto_name
+from uploader import upload_playwright_debug, convert_crypto_name
 
 # Define conversation states
 (
@@ -21,27 +21,21 @@ from uploader import upload_playwright, convert_crypto_name
     ENTERING_USERNAME,
     ENTERING_PASSWORD,
     CHOOSING_CRYPTO,
-    ENTERING_DATE,
-    ENTERING_TIME,
     PROCESSING,
     FINAL_CHOICE
-) = range(8)
-
-# Regex patterns for validation
-DATE_PATTERN = r'^\d{4}/\d{2}/\d{2}$'
-TIME_PATTERN = r'^\d{2}:\d{2}:\d{2}$'
+) = range(6)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the conversation and ask user for input."""
     await update.message.reply_text(
-        "🤖 سلام! به ربات تلگرامی تجارت نیوز خوش امدید."
+        "🤖 سلام! به ربات تلگرامی تجارت‌نیوز خوش آمدید."
     )
     return await auth_start(update, context)
 
 async def auth_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start authentication process."""
     await update.message.reply_text(
-         "🔑 برای تولید خبر قیمت لحظه ای رمز ارز دیجیتال باید ابتدا عملیات احراز هویت را انجام دهی."
+         "🔑 برای تولید خبر قیمت لحظه‌ای رمز ارز دیجیتال باید ابتدا عملیات احراز هویت را انجام دهید."
     )
     await update.message.reply_text("👤 نام کاربری را وارد کنید:")
     return ENTERING_USERNAME
@@ -59,34 +53,46 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         await update.message.reply_text("🔄 در حال اعتبارسنجی هویت...")
         
-        # Use the same login logic as upload_playwright
+        # Use WordPress login verification
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
+            browser = await p.chromium.launch(headless=True)
             try:
                 context_browser = await browser.new_context()
                 page = await context_browser.new_page()
-                await page.goto("https://tejaratnews.com/admin-start-b2dc")
+                await page.goto("https://tejaratnews.com/wp-login.php", wait_until="networkidle")
                 
-                await page.wait_for_timeout(300)
-                await page.fill('input[name="data[name]"]', context.user_data['username'])
-                await page.fill('input[name="data[password]"]', context.user_data['password'])
-                await page.wait_for_timeout(300)
-                await page.click('button[type="submit"]')
-                await page.wait_for_timeout(1000)
+                await page.fill('#user_login', context.user_data['username'])
+                await asyncio.sleep(1)
+                await page.fill('#user_pass', context.user_data['password'])
+                await asyncio.sleep(1)
+                await page.click('#wp-submit')
+                await page.wait_for_timeout(3000)
                 
                 # Check if login was successful
-                if "login" not in page.url:
+                if "wp-admin" in page.url:
                     await browser.close()
+                    # Create enhanced cryptocurrency keyboard with new currencies
                     keyboard = [
                         [
-                            InlineKeyboardButton("Doge", callback_data="doge"),
-                            InlineKeyboardButton("XRP", callback_data="ripple"),
-                            InlineKeyboardButton("Not", callback_data="not")
+                            InlineKeyboardButton("Bitcoin (BTC)", callback_data="btc"),
+                            InlineKeyboardButton("Ethereum (ETH)", callback_data="eth")
+                        ],
+                        [
+                            InlineKeyboardButton("Ripple (XRP)", callback_data="ripple"),
+                            InlineKeyboardButton("Dogecoin (DOGE)", callback_data="doge")
+                        ],
+                        [
+                            InlineKeyboardButton("Cardano (ADA)", callback_data="ada"),
+                            InlineKeyboardButton("Shiba Inu (SHIB)", callback_data="1000shib")
+                        ],
+                        [
+                            InlineKeyboardButton("Tron (TRX)", callback_data="trx"),
+                            InlineKeyboardButton("Notcoin (NOT)", callback_data="not")
                         ]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     await update.message.reply_text(
-                        "✅ احراز هویت با موفقیت انجام شد.\n💎 نام رمز ارز دیجیتال را انتخاب کنید:",
+                        "✅ احراز هویت با موفقیت انجام شد.\n💎 رمز ارز دیجیتال مورد نظر خود را انتخاب کنید:",
                         reply_markup=reply_markup
                     )
                     return CHOOSING_CRYPTO
@@ -100,7 +106,7 @@ async def receive_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 raise e
                 
     except Exception as e:
-        await update.message.reply_text(f"❌ خطای اعبارسنجی: {str(e)}")
+        await update.message.reply_text(f"❌ خطای اعتبارسنجی: {str(e)}")
         return await auth_start(update, context)
 
 async def crypto_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -109,90 +115,111 @@ async def crypto_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.answer()
     
     context.user_data['crypto_name'] = query.data
+    
+    # Get crypto name in Persian for display
+    crypto_persian = await convert_crypto_name(query.data)
+    
     await query.message.reply_text(
-         "📅 تاریخ انتشار را وارد کنید( به طور مثال: 1402/02/03):"
+         f"📊 {crypto_persian} ({query.data.upper()}) انتخاب شد.\n⚙️ در حال پردازش و تولید خبر..."
     )
-    return ENTERING_DATE
-
-async def receive_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process and validate the publication date."""
-    date_text = update.message.text
-    
-    if not re.match(DATE_PATTERN, date_text):
-        await update.message.reply_text(
-            "⚠️فرمت ورودی نادرست است! مجددا تاریخ انتشار را وارد کنید (فرمت: 1402/02/03):"
-        )
-        return ENTERING_DATE
-    
-    context.user_data['publish_date'] = date_text
-    await update.message.reply_text(
-         "⏰ زمان انتشار را وارد کنید (به طور مثال: 10:15:00):"
-    )
-    return ENTERING_TIME
-
-async def receive_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process and validate the publication time."""
-    time_text = update.message.text
-    
-    if not re.match(TIME_PATTERN, time_text):
-        await update.message.reply_text(
-            "⚠️ فرمت ورودی نادرست است! مجددا زمان انتشار را وارد کنید (فرمت: 10:15:00): "
-        )
-        return ENTERING_TIME
-    
-    context.user_data['publish_time'] = time_text
-    await update.message.reply_text("⚙️ در حال پردازش...")
     return await process_upload(update, context)
 
 async def process_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle the upload process."""
     try:
-        await update.message.reply_text(f"📊 در حال استخراج قیمت لحظه ای {context.user_data['crypto_name'].upper()}")
+        crypto_name = context.user_data['crypto_name']
+        crypto_persian = await convert_crypto_name(crypto_name)
         
-        crypto_data = await scrape(context.user_data['crypto_name'])
-        if not crypto_data:
+        # Determine if this is from callback query or message
+        if update.callback_query:
+            message_handler = update.callback_query.message
+        else:
+            message_handler = update.message
+        
+        await message_handler.reply_text(f"📊 در حال استخراج قیمت لحظه‌ای {crypto_persian}...")
+        
+        # Get cryptocurrency data
+        crypto_data = await scrape(crypto_name)
+        if not crypto_data or crypto_data['usdt_price'] == 'N/A':
             raise Exception("استخراج اطلاعات با خطا مواجه شد.")
         
-        await update.message.reply_text(
-              "📝 در حال بارگذاری اطلاعات و تولید خبر در تجارت نیوز..."
+        # Display extracted data to user
+        await message_handler.reply_text(
+            f"📈 اطلاعات استخراج شده:\n"
+            f"💰 قیمت USDT: {crypto_data['usdt_price']}\n"
+            f"💰 قیمت تومان: {crypto_data['irt_price']}\n"
+            f"📊 تغییرات 24 ساعته: {crypto_data['change_symb']} {crypto_data['change_24h']}%"
         )
         
-        # Combine date and time
-        publish = f"{context.user_data['publish_date']} {context.user_data['publish_time']}"
+        await message_handler.reply_text(
+              "📝 در حال بارگذاری اطلاعات و تولید خبر در تجارت‌نیوز..."
+        )
         
-        # Call upload_playwright with all the necessary information
-        await upload_playwright(
-            "https://tejaratnews.com/admin-start-b2dc",
+        # Call upload_playwright without date/time parameters
+        await upload_playwright_debug(
             context.user_data['username'],
             context.user_data['password'],
-            context.user_data['crypto_name'],
-            publish
+            crypto_name
         )
         
-        await update.message.reply_text("✅ خبر با موفقیت بارگذاری شد.")
+        await message_handler.reply_text("✅ خبر با موفقیت در تجارت‌نیوز بارگذاری شد.")
         
         # Show final options
         keyboard = [
             [
                 InlineKeyboardButton(
-                     "انتشار خبر  و استخراج قیمت لحظه ای رمز ارز دیگر",
+                     "📊 تولید خبر برای رمز ارز دیگر",
                     callback_data="publish_another"
                 )
             ],
             [
-                InlineKeyboardButton("خروج از حساب", callback_data="exit")
+                InlineKeyboardButton("🚪 خروج از حساب", callback_data="exit")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-             "الان میخواهید چکار کنید:",
+        await message_handler.reply_text(
+             "🎯 حالا می‌خواهید چه کاری انجام دهید؟",
             reply_markup=reply_markup
         )
         return FINAL_CHOICE
         
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {str(e)}")
-        return await auth_start(update, context)
+        # Determine message handler for error case
+        if update.callback_query:
+            message_handler = update.callback_query.message
+        elif update.message:
+            message_handler = update.message
+        else:
+            print(f"❌ Error in process_upload: {str(e)}")
+            return CHOOSING_CRYPTO
+            
+        await message_handler.reply_text(f"❌ خطا در پردازش: {str(e)}")
+        
+        # Return to crypto selection instead of re-authentication
+        keyboard = [
+            [
+                InlineKeyboardButton("Bitcoin (BTC)", callback_data="btc"),
+                InlineKeyboardButton("Ethereum (ETH)", callback_data="eth")
+            ],
+            [
+                InlineKeyboardButton("Ripple (XRP)", callback_data="ripple"),
+                InlineKeyboardButton("Dogecoin (DOGE)", callback_data="doge")
+            ],
+            [
+                InlineKeyboardButton("Cardano (ADA)", callback_data="ada"),
+                InlineKeyboardButton("Shiba Inu (SHIB)", callback_data="1000shib")
+            ],
+            [
+                InlineKeyboardButton("Tron (TRX)", callback_data="trx"),
+                InlineKeyboardButton("Notcoin (NOT)", callback_data="not")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message_handler.reply_text(
+            "💎 لطفاً رمز ارز دیگری را انتخاب کنید:",
+            reply_markup=reply_markup
+        )
+        return CHOOSING_CRYPTO
 
 async def handle_final_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user's final choice."""
@@ -202,22 +229,33 @@ async def handle_final_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
     if query.data == "publish_another":
         keyboard = [
             [
-                InlineKeyboardButton("Doge", callback_data="doge"),
-                InlineKeyboardButton("XRP", callback_data="ripple"),
-                InlineKeyboardButton("Not", callback_data="not")
+                InlineKeyboardButton("Bitcoin (BTC)", callback_data="btc"),
+                InlineKeyboardButton("Ethereum (ETH)", callback_data="eth")
+            ],
+            [
+                InlineKeyboardButton("Ripple (XRP)", callback_data="ripple"),
+                InlineKeyboardButton("Dogecoin (DOGE)", callback_data="doge")
+            ],
+            [
+                InlineKeyboardButton("Cardano (ADA)", callback_data="ada"),
+                InlineKeyboardButton("Shiba Inu (SHIB)", callback_data="1000shib")
+            ],
+            [
+                InlineKeyboardButton("Tron (TRX)", callback_data="trx"),
+                InlineKeyboardButton("Notcoin (NOT)", callback_data="not")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(
-            "💎 نام رمز ارز دیجیتال را انتخاب کنید:",
+            "💎 رمز ارز دیجیتال مورد نظر خود را انتخاب کنید:",
             reply_markup=reply_markup
         )
         return CHOOSING_CRYPTO
     else:  # exit
-        keyboard = [[InlineKeyboardButton("Login", callback_data="login")]]
+        keyboard = [[InlineKeyboardButton("🔑 ورود مجدد", callback_data="login")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(
-            "👋 تو از صفحه ادمین خارج شده ای.",
+            "👋 شما از پنل ادمین خارج شدید.\nبرای استفاده مجدد، دکمه ورود را فشار دهید.",
             reply_markup=reply_markup
         )
         return CHOOSING_AUTH
@@ -228,14 +266,21 @@ async def handle_login_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     await query.message.reply_text(
-          "🔑 برای تولید خبر قیمت لحظه ای رمز ارز دیجیتال باید ابتدا عملیات احراز هویت را انجام دهی."
+          "🔑 برای تولید خبر قیمت لحظه‌ای رمز ارز دیجیتال باید ابتدا عملیات احراز هویت را انجام دهید."
     )
     await query.message.reply_text("👤 نام کاربری را وارد کنید:")
     return ENTERING_USERNAME
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel the conversation."""
+    await update.message.reply_text(
+        "🚫 عملیات لغو شد. برای شروع مجدد از دستور /start استفاده کنید."
+    )
+    return ConversationHandler.END
+
 def main() -> None:
     """Set up and run the bot."""
-    # Replace 'YOUR_BOT_TOKEN' with your actual bot token
+    # Replace with your actual bot token
     application = Application.builder().token('7777155817:AAFU51H894E9e-69wWc7GeG-uFMIvt1LuXw').build()
 
     conv_handler = ConversationHandler(
@@ -251,19 +296,24 @@ def main() -> None:
             ENTERING_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_username)],
             ENTERING_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password)],
             CHOOSING_CRYPTO: [CallbackQueryHandler(crypto_choice)],
-            ENTERING_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_date)],
-            ENTERING_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_time)],
             PROCESSING: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_upload)],
             FINAL_CHOICE: [
                 CallbackQueryHandler(handle_final_choice, pattern='^(publish_another|exit)$'),
                 CallbackQueryHandler(handle_login_button, pattern='^login$')
             ],
         },
-        fallbacks=[CommandHandler('start', start)]
+        fallbacks=[
+            CommandHandler('start', start),
+            CommandHandler('cancel', cancel)
+        ]
     )
 
     application.add_handler(conv_handler)
+    
+    print("🤖 ربات تلگرام تجارت‌نیوز راه‌اندازی شد...")
     application.run_polling()
 
 if __name__ == '__main__':
     main()
+
+# ---------------------------------------------------------------------------
